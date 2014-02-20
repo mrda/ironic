@@ -96,9 +96,9 @@ class ManagerTestCase(base.DbTestCase):
         node = self.dbapi.get_node(n['id'])
         self.assertEqual(node['power_state'], 'fake-power')
 
-    def test__sync_power_state_do_sync(self):
+    def test__sync_power_state_not_set(self):
         self.service.start()
-        n = utils.get_test_node(driver='fake', power_state='fake-power')
+        n = utils.get_test_node(driver='fake', power_state=None)
         self.dbapi.create_node(n)
         with mock.patch.object(self.driver.power,
                                'get_power_state') as get_power_mock:
@@ -107,6 +107,57 @@ class ManagerTestCase(base.DbTestCase):
             get_power_mock.assert_called_once_with(mock.ANY, mock.ANY)
         node = self.dbapi.get_node(n['id'])
         self.assertEqual(node['power_state'], states.POWER_ON)
+
+    def test__sync_power_state_unchanged(self):
+        self.service.start()
+        n = utils.get_test_node(driver='fake', power_state=states.POWER_ON)
+        self.dbapi.create_node(n)
+        with mock.patch.object(self.driver.power,
+                               'get_power_state') as get_power_mock:
+            get_power_mock.return_value = states.POWER_ON
+            with mock.patch.object(objects.node.Node, 'save') as save_mock:
+                self.service._sync_power_states(self.context)
+                get_power_mock.assert_called_once_with(mock.ANY, mock.ANY)
+                self.assertFalse(save_mock.called)
+                node = self.dbapi.get_node(n['id'])
+                self.assertEqual(node['power_state'], states.POWER_ON)
+
+    def test__sync_power_state_changed_sync(self):
+        self.service.start()
+        cfg.CONF.conductor.force_power_state_during_sync = True
+        n = utils.get_test_node(driver='fake', power_state=states.POWER_ON)
+        self.dbapi.create_node(n)
+        with mock.patch.object(self.driver.power,
+                               'get_power_state') as get_power_mock:
+            get_power_mock.return_value = states.POWER_OFF
+            with mock.patch.object(conductor_utils,
+                                   'node_power_action') as npa_mock:
+                with mock.patch.object(objects.node.Node, 'save') as save_mock:
+                    self.service._sync_power_states(self.context)
+                    get_power_mock.assert_called_once_with(mock.ANY, mock.ANY)
+                    npa_mock.assert_called_once_with(mock.ANY, mock.ANY,
+                                                     mock.ANY)
+                    self.assertFalse(save_mock.called)
+                    node = self.dbapi.get_node(n['id'])
+                    self.assertEqual(node['power_state'], states.POWER_ON)
+
+    def test__sync_power_state_changed_save(self):
+        self.service.start()
+        cfg.CONF.conductor.force_power_state_during_sync = False
+        n = utils.get_test_node(driver='fake', power_state=states.POWER_OFF)
+        self.dbapi.create_node(n)
+        with mock.patch.object(self.driver.power,
+                               'get_power_state') as get_power_mock:
+            get_power_mock.return_value = states.POWER_ON
+            with mock.patch.object(objects.node.Node, 'save') as save_mock:
+                with mock.patch.object(conductor_utils,
+                                       'node_power_action') as npa_mock:
+                    self.service._sync_power_states(self.context)
+                    get_power_mock.assert_called_once_with(mock.ANY, mock.ANY)
+                    save_mock.assert_called_once_with(mock.ANY)
+                    self.assertFalse(npa_mock.called)
+                    node = self.dbapi.get_node(n['id'])
+                    self.assertEqual(node['power_state'], states.POWER_OFF)
 
     def test__sync_power_state_node_locked(self):
         self.service.start()
@@ -122,6 +173,7 @@ class ManagerTestCase(base.DbTestCase):
 
     def test__sync_power_state_multiple_nodes(self):
         self.service.start()
+        cfg.CONF.conductor.force_power_state_during_sync = False
 
         # create three nodes
         nodes = []
@@ -154,6 +206,7 @@ class ManagerTestCase(base.DbTestCase):
 
     def test__sync_power_state_node_no_power_state(self):
         self.service.start()
+        cfg.CONF.conductor.force_power_state_during_sync = False
 
         # create three nodes
         nodes = []

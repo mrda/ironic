@@ -82,6 +82,12 @@ conductor_opts = [
                    default=60,
                    help='Interval between syncing the node power state to the '
                         'database, in seconds.'),
+        cfg.BoolOpt('force_power_state_during_sync',
+                   default=True,
+                   help='During sync_power_state, should the hardware power '
+                        'state be set to the expected state (True) or should '
+                        'the database be updated based on the hardware '
+                        'state (False). Default: True.'),
 ]
 
 CONF = cfg.CONF
@@ -406,17 +412,29 @@ class ConductorManager(service.PeriodicService):
                             {'node': node.uuid, 'err': e})
                         continue
 
-                    if power_state != node['power_state']:
-                        # NOTE(deva): don't log a warning the first time we
-                        #             sync a node's power state
-                        if node['power_state'] is not None:
-                            LOG.warning(_("During sync_power_state, node "
-                                "%(node)s out of sync. Expected: %(old)s. "
-                                "Actual: %(new)s. Updating DB.") %
-                                {'node': node['uuid'],
-                                 'old': node['power_state'],
-                                 'new': power_state})
-                        node['power_state'] = power_state
+                    if node.power_state is None:
+                        LOG.info(_("During sync_power_state, node %(node)s "
+                            "has no power state recorded in the database. "
+                            "Updating database."), {'node': node.uuid})
+                        node.power_state = power_state
+                        node.save(context)
+
+                    if power_state == node.power_state:
+                        continue
+
+                    if CONF.conductor.force_power_state_during_sync:
+                        LOG.warning(_("During sync_power_state, node "
+                            "%(node)s is out of sync. Setting the "
+                            "hardware state to %(state)s."),
+                            {'node': node.uuid, 'state': node.power_state})
+                        utils.node_power_action(task, task.node,
+                                                node.power_state)
+                    else:
+                        LOG.warning(_("During sync_power_state, node "
+                            "%(node)s is out of sync. Updating the "
+                            "database to %(state)s."),
+                            {'node': node.uuid, 'state': power_state})
+                        node.power_state = power_state
                         node.save(context)
 
             except exception.NodeNotFound:
