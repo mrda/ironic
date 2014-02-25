@@ -87,6 +87,7 @@ class TestListNodes(base.FunctionalTest):
         self.assertNotIn('reservation', data['nodes'][0])
         # never expose the chassis_id
         self.assertNotIn('chassis_id', data['nodes'][0])
+        self.assertNotIn('maintenance', data['nodes'][0])
 
     def test_detail(self):
         ndict = dbutils.get_test_node()
