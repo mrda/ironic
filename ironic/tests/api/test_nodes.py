@@ -558,13 +558,16 @@ class TestPatch(base.FunctionalTest):
         self.assertTrue(response.json['error_message'])
 
     def test_replace_maintenance(self):
-        response = self.patch_json('/nodes/%s' % self.node['uuid'],
+        self.mock_update_node.return_value = self.node
+
+        response = self.patch_json('/nodes/%s' % self.node.uuid,
                                    [{'path': '/maintenance', 'op': 'replace',
-                                     'value': 'fake'}],
-                                   expect_errors=True)
+                                     'value': 'true'}])
         self.assertEqual('application/json', response.content_type)
-        self.assertEqual(400, response.status_code)
-        self.assertTrue(response.json['error_message'])
+        self.assertEqual(200, response.status_code)
+
+        self.mock_update_node.assert_called_once_with(
+                mock.ANY, mock.ANY, 'test-topic')
 
 
 class TestPost(base.FunctionalTest):
@@ -814,3 +817,13 @@ class TestPut(base.FunctionalTest):
                             {'target': states.ACTIVE},
                             expect_errors=True)
         self.assertEqual(400, ret.status_code)
+
+    def test_provision_node_in_maintenance_fail(self):
+        ndict = dbutils.get_test_node(id=1, uuid=utils.generate_uuid(),
+                                      maintenance=True)
+        node = self.dbapi.create_node(ndict)
+        ret = self.put_json('/nodes/%s/states/provision' % node.uuid,
+                            {'target': states.ACTIVE},
+                            expect_errors=True)
+        self.assertEqual(400, ret.status_code)
+        self.assertTrue(ret.json['error_message'])

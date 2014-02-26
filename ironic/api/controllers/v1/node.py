@@ -52,9 +52,9 @@ class NodePatchType(types.JsonPatchType):
     @staticmethod
     def internal_attrs():
         defaults = types.JsonPatchType.internal_attrs()
-        return defaults + ['/last_error', '/maintenance', '/power_state',
-                           '/provision_state', '/reservation',
-                           '/target_power_state', '/target_provision_state']
+        return defaults + ['/last_error', '/power_state', '/provision_state',
+                           '/reservation', '/target_power_state',
+                           '/target_provision_state']
 
     @staticmethod
     def mandatory_attrs():
@@ -157,6 +157,10 @@ class NodeStatesController(rest.RestController):
         """
         rpc_node = objects.Node.get_by_uuid(pecan.request.context, node_uuid)
         topic = pecan.request.rpcapi.get_topic_for(rpc_node)
+
+        if rpc_node.maintenance:
+            op = _('provisioning')
+            raise exception.NodeInMaintenance(op=op, node=node_uuid)
 
         if rpc_node.target_provision_state is not None:
             msg = _('Node %s is already being provisioned.') % rpc_node['uuid']
