@@ -15,6 +15,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import datetime
 import time
 
 from ironicclient import client as ironic_client
@@ -23,6 +24,7 @@ from ironicclient import exc as ironic_exception
 from nova import exception
 from nova.openstack.common.gettextutils import _
 from nova.openstack.common import log as logging
+from nova.openstack.common import timeutils
 from oslo.config import cfg
 
 LOG = logging.getLogger(__name__)
@@ -32,9 +34,28 @@ CONF = cfg.CONF
 class IronicClientWrapper(object):
     """Ironic client wrapper class that encapsulates retry logic."""
 
+    # Note(mrda): Before using this cached client, you should check the
+    # expiry time in the token.
+    _cli = None
+
+    def _is_token_valid(self, token):
+        """Check the supplied token's expiry date.
+
+        If the supplied token's expiry date is more than 30 seconds in the future
+        then it's deemed to be valid.
+
+        :param token: The token to check
+
+        :returns: True of the token is valid, False otherwise
+        """
+        if 'expires' in token:
+            tz_expiry = timeutils.parse_isotime(token['expires'])
+            expiry = timeutils.normalize_time(tz_expiry)
+            return (expiry > (timeutils.utcnow() + datetime.timedelta(seconds=30)))
+        else:
+            return False
+
     def _get_client(self):
-        # TODO(deva): save and reuse existing client & auth token
-        #             until it expires or is no longer valid
         auth_token = CONF.ironic.admin_auth_token
         if auth_token is None:
             kwargs = {'os_username': CONF.ironic.admin_username,
@@ -47,14 +68,26 @@ class IronicClientWrapper(object):
             kwargs = {'os_auth_token': auth_token,
                       'ironic_url': CONF.ironic.api_endpoint}
 
-        try:
-            cli = ironic_client.get_client(CONF.ironic.api_version, **kwargs)
-        except ironic_exception.Unauthorized:
-            msg = (_("Unable to authenticate Ironic client."))
-            LOG.error(msg)
-            raise exception.NovaException(msg)
+        get_token = True
 
-        return cli
+        # Check to see if the token is still valid
+        if IronicClientWrapper._cli is not None:
+            if 'token' in IronicClientWrapper._cli:
+                if self._is_token_valid(IronicClientWrapper._cli['token']):
+                    LOG.debug("Using existing authentication token")
+                    get_token = False
+
+        if get_token:
+            LOG.debug("Requesting new authentication token")
+            try:
+                IronicClientWrapper._cli = ironic_client.get_client(
+                    CONF.ironic.api_version, **kwargs)
+            except ironic_exception.Unauthorized:
+                msg = (_("Unable to authenticate Ironic client."))
+                LOG.error(msg)
+                raise exception.NovaException(msg)
+
+        return IronicClientWrapper._cli
 
     def _multi_getattr(self, obj, attr):
         """Support nested attribute path for getattr().
