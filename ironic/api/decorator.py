@@ -13,6 +13,17 @@
 #    WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 #    License for the specific language governing permissions and limitations
 #    under the License.
-from ironic.api import decorator
+import wsmeext.pecan as wsme_pecan
 
-decorator.patch_wsexpose()
+_orig_wsexpose_decorator = wsme_pecan.wsexpose
+
+
+def _ironic_wsexpose(*args, **kwargs):
+    """Ensure that only JSON, and not XML, is supported."""
+    kwargs['rest_content_types'] = "('json',)"
+    return _orig_wsexpose_decorator(*args, **kwargs)
+
+
+def patch_wsexpose():
+    """Patch the @wsexpose decorator for Ironic."""
+    wsme_pecan.wsexpose = _ironic_wsexpose
