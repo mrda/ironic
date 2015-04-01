@@ -27,6 +27,16 @@ ADMIN_TOKEN = '4562138218392831'
 MEMBER_TOKEN = '4562138218392832'
 
 
+def post_get_test_node(**kw):
+    # NOTE(lucasagomes): When creating a node via API (POST)
+    #                    we have to use chassis_uuid
+    node = node_post_data(**kw)
+    chassis = utils.get_test_chassis()
+    node['chassis_id'] = None
+    node['chassis_uuid'] = kw.get('chassis_uuid', chassis['uuid'])
+    return node
+
+
 class FakeMemcache(object):
     """Fake cache that is used for keystone tokens lookup."""
 
